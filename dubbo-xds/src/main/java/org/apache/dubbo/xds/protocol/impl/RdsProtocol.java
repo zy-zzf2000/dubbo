@@ -19,7 +19,10 @@ package org.apache.dubbo.xds.protocol.impl;
 import org.apache.dubbo.common.logger.ErrorTypeAwareLogger;
 import org.apache.dubbo.common.logger.LoggerFactory;
 import org.apache.dubbo.xds.AdsObserver;
+import org.apache.dubbo.xds.HttpFilterConfigFactory;
+import org.apache.dubbo.xds.HttpFilterConfigFactoryRegistry;
 import org.apache.dubbo.xds.protocol.AbstractProtocol;
+import org.apache.dubbo.xds.resource.XdsHttpFilterConfig;
 import org.apache.dubbo.xds.resource.XdsRoute;
 import org.apache.dubbo.xds.resource.XdsRouteAction;
 import org.apache.dubbo.xds.resource.XdsRouteConfiguration;
@@ -131,6 +134,18 @@ public class RdsProtocol extends AbstractProtocol<String> {
 
     public XdsRoute parseRoute(Route route) {
         XdsRoute xdsRoute = new XdsRoute();
+
+        Map<String,Any> map = route.getTypedPerFilterConfigMap();
+        if(map.size()!=0){
+            for(Map.Entry<String,Any> entry:map.entrySet()) {
+                String typeUrl = entry.getValue().getTypeUrl();
+                HttpFilterConfigFactory factory = HttpFilterConfigFactoryRegistry.getInstance().getFactory(typeUrl);
+                if (factory != null) {
+                    XdsHttpFilterConfig xdsHttpFilterConfig = factory.parseHttpFilterConfig(entry.getValue());
+                    xdsRoute.addHttpFilterConfig(xdsHttpFilterConfig);
+                }
+            }
+        }
 
         XdsRouteMatch xdsRouteMatch = parseRouteMatch(route.getMatch());
         XdsRouteAction xdsRouteAction = parseRouteAction(route.getRoute());

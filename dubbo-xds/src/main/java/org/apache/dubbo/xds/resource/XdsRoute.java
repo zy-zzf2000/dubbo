@@ -16,12 +16,17 @@
  */
 package org.apache.dubbo.xds.resource;
 
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
 public class XdsRoute {
     private String name;
 
     private XdsRouteMatch routeMatch;
 
     private XdsRouteAction routeAction;
+
+    private final Map<String, XdsHttpFilterConfig> httpFilterConfigs = new ConcurrentHashMap<>();
 
     public String getName() {
         return name;
@@ -45,5 +50,13 @@ public class XdsRoute {
 
     public void setRouteAction(XdsRouteAction routeAction) {
         this.routeAction = routeAction;
+    }
+
+    public Map<String, XdsHttpFilterConfig> getHttpFilterConfigs() {
+        return httpFilterConfigs;
+    }
+
+    public void addHttpFilterConfig(XdsHttpFilterConfig httpFilterConfig) {
+        httpFilterConfigs.put(httpFilterConfig.typeUrl(), httpFilterConfig);
     }
 }

@@ -28,6 +28,7 @@ import org.apache.dubbo.rpc.support.RpcUtils;
 import org.apache.dubbo.xds.PilotExchanger;
 import org.apache.dubbo.xds.resource.XdsCluster;
 import org.apache.dubbo.xds.resource.XdsClusterWeight;
+import org.apache.dubbo.xds.resource.XdsHttpFilterConfig;
 import org.apache.dubbo.xds.resource.XdsRoute;
 import org.apache.dubbo.xds.resource.XdsVirtualHost;
 
@@ -85,7 +86,12 @@ public class XdsRouter<T> extends AbstractStateRouter<T> {
             String path = "/" + invocation.getInvoker().getUrl().getPath() + "/" + RpcUtils.getMethodName(invocation);
             if (xdsRoute.getRouteMatch().isMatch(path)) {
                 cluster = xdsRoute.getRouteAction().getCluster();
-
+                Map<String, XdsHttpFilterConfig> httpFilterConfigs = xdsRoute.getHttpFilterConfigs();
+                //put the filter config to the attachment for temporary
+                //TODO:optimize the way to get the filter config
+                if(httpFilterConfigs != null && !httpFilterConfigs.isEmpty()) {
+                    invocation.setObjectAttachment("httpFilterConfig", httpFilterConfigs);
+                }
                 // if weighted cluster
                 if (cluster == null) {
                     cluster = computeWeightCluster(xdsRoute.getRouteAction().getClusterWeights());

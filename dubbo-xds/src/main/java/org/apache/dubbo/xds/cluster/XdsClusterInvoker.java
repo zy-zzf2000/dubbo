@@ -39,12 +39,14 @@ import org.apache.dubbo.rpc.support.RpcUtils;
 import org.apache.dubbo.xds.resource.XdsFaultConfig;
 import org.apache.dubbo.xds.resource.XdsFaultConfig.XdsFaultAbort;
 import org.apache.dubbo.xds.resource.XdsFaultConfig.XdsFaultDelay;
+import org.apache.dubbo.xds.resource.XdsFaultConfig.XdsFractionalPercent;
 import org.apache.dubbo.xds.resource.XdsHttpFilterConfig;
 
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -52,9 +54,7 @@ public class XdsClusterInvoker<T> extends AbstractClusterInvoker<T> {
 
     private volatile Timer delayTimer;
     private final AtomicLong activeFaults;
-
-    private static final ErrorTypeAwareLogger logger =
-            LoggerFactory.getErrorTypeAwareLogger(XdsClusterInvoker.class);
+    private static final ErrorTypeAwareLogger logger = LoggerFactory.getErrorTypeAwareLogger(XdsClusterInvoker.class);
 
     public XdsClusterInvoker(Directory<T> directory) {
         super(directory);
@@ -62,46 +62,49 @@ public class XdsClusterInvoker<T> extends AbstractClusterInvoker<T> {
     }
 
     @Override
-    protected Result doInvoke(Invocation invocation, List<Invoker<T>> invokers, LoadBalance loadbalance)
-            throws RpcException {
-        Invoker<T> invoker = select(loadbalance, invocation, invokers, null);
-        //TODO: optimize the way to get httpFilterConfigs
-        Map<String, XdsHttpFilterConfig> httpFilterConfigs = (Map<String, XdsHttpFilterConfig>)invocation.getObjectAttachment("httpFilterConfig");
+    protected Result doInvoke(
+            Invocation invocation,
+            List<Invoker<T>> invokers,
+            LoadBalance loadbalance) throws RpcException {
+        while (true) {
+            Invoker<T> invoker = select(loadbalance, invocation, invokers, null);
+            //TODO: optimize the way to get httpFilterConfigs
+            Map<String, XdsHttpFilterConfig> httpFilterConfigs =
+                    (Map<String, XdsHttpFilterConfig>) invocation.getObjectAttachment("httpFilterConfig");
 
-        if(httpFilterConfigs != null) {
-            invocation.getObjectAttachments().remove("httpFilterConfig");
-        }
-        try {
-            if(httpFilterConfigs != null) {
-                XdsFaultConfig faultConfig = (XdsFaultConfig) httpFilterConfigs.get(XdsFaultConfig.TYPE_URL);
-                if(faultConfig != null) {
-                    if(injectActiveFault(faultConfig, invocation, invokers, loadbalance, invoker.getUrl())){
-                        logger.info("start fault injection");
-                        return AsyncRpcResult.newDefaultAsyncResult(null, null, invocation); // ignore
+            if (httpFilterConfigs != null) {
+                invocation.getObjectAttachments()
+                        .remove("httpFilterConfig");
+            }
+            try {
+                if (httpFilterConfigs != null) {
+                    XdsFaultConfig faultConfig = (XdsFaultConfig) httpFilterConfigs.get(XdsFaultConfig.TYPE_URL);
+                    if (faultConfig != null) {
+                        if (injectActiveFault(faultConfig, invocation, invokers, loadbalance, invoker.getUrl())) {
+                            logger.info("start fault injection");
+                            return AsyncRpcResult.newDefaultAsyncResult(null, null, invocation); // ignore
+                        }
                     }
                 }
+                return invokeWithContext(invoker, invocation);
+            } catch (Throwable e) {
+                if (e instanceof RpcException && ((RpcException) e).isBiz()) { // biz exception.
+                    throw (RpcException) e;
+                }
+                throw new RpcException(e instanceof RpcException ? ((RpcException) e).getCode() : 0,
+                        "Xds invoke providers " + invoker.getUrl() + " " + loadbalance.getClass()
+                                .getSimpleName() + " for service " + getInterface().getName() + " method "
+                                + RpcUtils.getMethodName(invocation) + " on consumer " + NetUtils.getLocalHost()
+                                + " use dubbo version " + Version.getVersion()
+                                + ", but no luck to perform the invocation. Last error is: " + e.getMessage(),
+                        e.getCause() != null ? e.getCause() : e);
             }
-            return invokeWithContext(invoker, invocation);
-        } catch (Throwable e) {
-            if (e instanceof RpcException && ((RpcException) e).isBiz()) { // biz exception.
-                throw (RpcException) e;
-            }
-            throw new RpcException(
-                    e instanceof RpcException ? ((RpcException) e).getCode() : 0,
-                    "Xds invoke providers " + invoker.getUrl() + " "
-                            + loadbalance.getClass().getSimpleName()
-                            + " for service " + getInterface().getName()
-                            + " method " + RpcUtils.getMethodName(invocation) + " on consumer "
-                            + NetUtils.getLocalHost()
-                            + " use dubbo version " + Version.getVersion()
-                            + ", but no luck to perform the invocation. Last error is: " + e.getMessage(),
-                    e.getCause() != null ? e.getCause() : e);
         }
     }
 
-
     /**
-     * Add a active fault to the invoker
+     * Add an active fault to the invoker
+     *
      * @return true if the fault is injected successfully, false otherwise
      */
     private boolean injectActiveFault(
@@ -109,7 +112,7 @@ public class XdsClusterInvoker<T> extends AbstractClusterInvoker<T> {
             Invocation invocation,
             List<Invoker<T>> invokers,
             LoadBalance loadbalance,
-            URL consumerUrl){
+            URL consumerUrl) {
         Long delayNanos = null;
         Integer httpStatus = null;
         Integer grpcStatus = null;
@@ -117,62 +120,60 @@ public class XdsClusterInvoker<T> extends AbstractClusterInvoker<T> {
         if (delayTimer == null) {
             synchronized (this) {
                 if (delayTimer == null) {
-                    delayTimer = new HashedWheelTimer(
-                            new NamedThreadFactory("xds-cluster-timer", true),
-                            100,
-                            TimeUnit.MILLISECONDS,
-                            128);
+                    delayTimer = new HashedWheelTimer(new NamedThreadFactory("xds-cluster-timer", true), 100,
+                            TimeUnit.MILLISECONDS, 128);
                 }
             }
         }
 
         //if the number of active faults exceeds the maxActiveFaults, return false
-        if(faultConfig.getMaxActiveFaults()!=null && activeFaults.get() >= faultConfig.getMaxActiveFaults()){
+        if (faultConfig.getMaxActiveFaults() != null && activeFaults.get() >= faultConfig.getMaxActiveFaults()) {
             return false;
         }
 
         XdsFaultDelay delay = faultConfig.getXdsFaultDelay();
-        if(delay!=null){
-            delayNanos = delay.getDelayNanos();
+        if (delay != null) {
+            XdsFractionalPercent percent = delay.getPercent();
+            if(ThreadLocalRandom.current().nextInt(1000000) < getRatePerMillion(percent)) {
+                delayNanos = delay.getDelayNanos();
+            }
         }
 
-
         XdsFaultAbort abort = faultConfig.getXdsFaultAbort();
-        if(abort!=null){
-            httpStatus = abort.getHttpStatus();
-            grpcStatus = abort.getGrpcStatus();
+        if (abort != null) {
+            XdsFractionalPercent percent = delay.getPercent();
+            if(ThreadLocalRandom.current().nextInt(1000000) < getRatePerMillion(percent)) {
+                httpStatus = abort.getHttpStatus();
+                grpcStatus = abort.getGrpcStatus();
+            }
         }
 
         //if no fault injection is needed, return false
-        if(delayNanos==null && httpStatus==null && grpcStatus==null){
+        if (delayNanos == null && httpStatus == null && grpcStatus == null) {
             return false;
         }
 
-        if(delayNanos!=null){
+        if (delayNanos != null) {
             DelayTimerTask retryTimerTask;
-            if(httpStatus!=null || grpcStatus!=null){
-                retryTimerTask = new DelayTimerTask(
-                        invocation, invokers, loadbalance, httpStatus, grpcStatus, true);
-            }else{
-                retryTimerTask = new DelayTimerTask(
-                        invocation, invokers, loadbalance, null, null, false);
+            if (httpStatus != null || grpcStatus != null) {
+                retryTimerTask = new DelayTimerTask(invocation, invokers, loadbalance, httpStatus, grpcStatus, true);
+            } else {
+                retryTimerTask = new DelayTimerTask(invocation, invokers, loadbalance, null, null, false);
             }
             delayTimer.newTimeout(retryTimerTask, delayNanos, TimeUnit.NANOSECONDS);
-        }else if(httpStatus!=null || grpcStatus!=null){
+        } else if (httpStatus != null || grpcStatus != null) {
             throw new RpcException(
-                    httpStatus==null?grpcStatus:httpStatus,
-                    "AbortFault Injection " + " for service " + getInterface().getName()
-                            + " method " + RpcUtils.getMethodName(invocation) + " on consumer "
-                            + NetUtils.getLocalHost()
-                            + " use dubbo version " + Version.getVersion()
-                            + "with httpStatus " + httpStatus
+                    httpStatus == null ? grpcStatus : httpStatus,
+                    "AbortFault Injection " + " for service " + getInterface().getName() + " method "
+                            + RpcUtils.getMethodName(invocation) + " on consumer " + NetUtils.getLocalHost()
+                            + " use dubbo version " + Version.getVersion() + "with httpStatus " + httpStatus
                             + "and grpcStatus " + grpcStatus);
         }
         return true;
     }
 
     /**
-     *  delay injection
+     * delay injection
      */
     private class DelayTimerTask implements TimerTask {
         private final Invocation invocation;
@@ -202,26 +203,52 @@ public class XdsClusterInvoker<T> extends AbstractClusterInvoker<T> {
 
         @Override
         public void run(Timeout timeout) throws Exception {
-            try{
+            try {
                 activeFaults.incrementAndGet();
-                if(isAbort){
+                if (isAbort) {
                     //abort the request,throw exception
                     throw new RpcException(
-                            httpStatus==null?grpcStatus:httpStatus,
-                            "AbortFault Injection " + " for service " + getInterface().getName()
-                                    + " method " + RpcUtils.getMethodName(invocation) + " on consumer "
-                                    + NetUtils.getLocalHost()
-                                    + " use dubbo version " + Version.getVersion()
-                                    + "with httpStatus " + httpStatus
+                            httpStatus == null ? grpcStatus : httpStatus,
+                            "AbortFault Injection " + " for service " + getInterface().getName() + " method "
+                                    + RpcUtils.getMethodName(invocation) + " on consumer " + NetUtils.getLocalHost()
+                                    + " use dubbo version " + Version.getVersion() + "with httpStatus " + httpStatus
                                     + "and grpcStatus " + grpcStatus);
-                }else{
+                } else {
                     logger.info("Send the request after delay injection");
                     Invoker<T> invoker = select(loadbalance, invocation, invokers, null);
                     invokeWithContext(invoker, invocation);
                 }
-            }finally {
+            } finally {
                 activeFaults.decrementAndGet();
             }
         }
+    }
+
+    @Override
+    public boolean isAvailable() {
+        return true;
+    }
+
+    /**
+     * see <a href="https://www.envoyproxy.io/docs/envoy/latest/api-v3/type/v3/percent.proto#type-v3-fractionalpercent">FractionalPercent</a>
+     */
+    private static int getRatePerMillion(XdsFractionalPercent percent) {
+        int numerator = percent.getNumerator();
+        XdsFractionalPercent.DenominatorType type = percent.getDenominatorType();
+        switch (type) {
+            case HUNDRED:
+                numerator *= 10000;
+                break;
+            case TEN_THOUSAND:
+                numerator *= 100;
+                break;
+            case MILLION:
+            default:
+                break;
+        }
+        if(numerator > 1000000 || numerator < 0){
+            return 1000000;
+        }
+        return numerator;
     }
 }

@@ -12,7 +12,6 @@ import io.envoyproxy.envoy.type.v3.FractionalPercent;
 import org.apache.dubbo.common.logger.ErrorTypeAwareLogger;
 import org.apache.dubbo.common.logger.LoggerFactory;
 import org.apache.dubbo.xds.resource.XdsFaultConfig;
-import org.apache.dubbo.xds.resource.XdsFaultConfig.DenominatorType;
 import org.apache.dubbo.xds.resource.XdsFaultConfig.XdsFaultAbort;
 import org.apache.dubbo.xds.resource.XdsFaultConfig.XdsFaultDelay;
 import org.apache.dubbo.xds.resource.XdsFaultConfig.XdsFractionalPercent;
@@ -101,11 +100,11 @@ public class FaultConfigFactory implements HttpFilterConfigFactory{
     public XdsFractionalPercent parseFractionalPercent(FractionalPercent percent){
         switch (percent.getDenominator()) {
             case HUNDRED:
-                return XdsFractionalPercent.create(percent.getNumerator(), DenominatorType.HUNDRED);
+                return XdsFractionalPercent.create(percent.getNumerator(), XdsFractionalPercent.DenominatorType.HUNDRED);
             case TEN_THOUSAND:
-                return XdsFractionalPercent.create(percent.getNumerator(), DenominatorType.TEN_THOUSAND);
+                return XdsFractionalPercent.create(percent.getNumerator(), XdsFractionalPercent.DenominatorType.TEN_THOUSAND);
             case MILLION:
-                return XdsFractionalPercent.create(percent.getNumerator(), DenominatorType.MILLION);
+                return XdsFractionalPercent.create(percent.getNumerator(), XdsFractionalPercent.DenominatorType.MILLION);
             default:
                 logger.error(REGISTRY_ERROR_RESPONSE_XDS, "", "", "Error occur when decode xDS response.");
                 return null;

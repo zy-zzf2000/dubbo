@@ -115,9 +115,18 @@ public class XdsFaultConfig implements XdsHttpFilterConfig {
         public boolean isHeaderAbort() {
             return headerAbort;
         }
+
+        public XdsFractionalPercent getPercent() {
+            return percent;
+        }
     }
 
     public static class XdsFractionalPercent {
+
+        public  enum DenominatorType {
+            HUNDRED, TEN_THOUSAND, MILLION
+        }
+
         private final int numerator;
         private final DenominatorType denominatorType;
 
@@ -129,12 +138,15 @@ public class XdsFaultConfig implements XdsHttpFilterConfig {
         public static XdsFractionalPercent create(int numerator, DenominatorType denominatorType) {
             return new XdsFractionalPercent(numerator, denominatorType);
         }
-    }
 
-    public enum DenominatorType {
-        HUNDRED, TEN_THOUSAND, MILLION
-    }
+        public int getNumerator() {
+            return numerator;
+        }
 
+        public DenominatorType getDenominatorType() {
+            return denominatorType;
+        }
+    }
     @Override
     public String toString() {
         return "XdsFaultConfig{" + "xdsFaultDelay=" + xdsFaultDelay.delayNanos + ", xdsFaultAbort=" + xdsFaultAbort.httpStatus + '}';

@@ -169,7 +169,12 @@ public class RdsProtocol extends AbstractProtocol<String> {
         XdsRouteAction xdsRouteAction = new XdsRouteAction();
 
         String cluster = routeAction.getCluster();
-
+        //get timeout config
+        int timeout = routeAction.getTimeout().getNanos();
+        if(timeout!=0){
+            //convert nanos to millis
+            xdsRouteAction.setTimeout(timeout/1000000);
+        }
         if (cluster.equals("")) {
             System.out.println("parse weight clusters");
         }

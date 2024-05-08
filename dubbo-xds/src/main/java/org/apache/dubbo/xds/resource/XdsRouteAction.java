@@ -23,6 +23,9 @@ public class XdsRouteAction {
 
     private List<XdsClusterWeight> clusterWeights;
 
+    // timeout in milliseconds
+    private int timeout;
+
     public String getCluster() {
         return cluster;
     }
@@ -37,5 +40,13 @@ public class XdsRouteAction {
 
     public void setClusterWeights(List<XdsClusterWeight> clusterWeights) {
         this.clusterWeights = clusterWeights;
+    }
+
+    public int getTimeout() {
+        return timeout;
+    }
+
+    public void setTimeout(int timeout) {
+        this.timeout = timeout;
     }
 }

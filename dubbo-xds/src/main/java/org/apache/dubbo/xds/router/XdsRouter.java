@@ -38,6 +38,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
+import static org.apache.dubbo.common.constants.CommonConstants.TIMEOUT_KEY;
+
 public class XdsRouter<T> extends AbstractStateRouter<T> {
 
     private final PilotExchanger pilotExchanger = PilotExchanger.getInstance();
@@ -79,13 +81,17 @@ public class XdsRouter<T> extends AbstractStateRouter<T> {
         String cluster = null;
         String serviceName = invocation.getInvoker().getUrl().getParameter("providedBy");
         XdsVirtualHost xdsVirtualHost = pilotExchanger.getXdsVirtualHostMap().get(serviceName);
-
+        int timeout = 0;
         // match route
         for (XdsRoute xdsRoute : xdsVirtualHost.getRoutes()) {
             // match path
             String path = "/" + invocation.getInvoker().getUrl().getPath() + "/" + RpcUtils.getMethodName(invocation);
             if (xdsRoute.getRouteMatch().isMatch(path)) {
                 cluster = xdsRoute.getRouteAction().getCluster();
+                timeout = xdsRoute.getRouteAction().getTimeout();
+                if(timeout > 0) {
+                    invocation.setObjectAttachment(TIMEOUT_KEY, timeout);
+                }
                 Map<String, XdsHttpFilterConfig> httpFilterConfigs = xdsRoute.getHttpFilterConfigs();
                 //put the filter config to the attachment for temporary
                 //TODO:optimize the way to get the filter config
